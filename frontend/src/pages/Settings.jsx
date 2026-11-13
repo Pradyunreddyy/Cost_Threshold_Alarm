@@ -26,11 +26,11 @@ import SecurityRounded from "@mui/icons-material/SecurityRounded";
 import SaveRounded from "@mui/icons-material/SaveRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 
-const API_URL = "https://cost-threshold-alarm-backend.onrender.com/api/settings/";
+const API_URL = "https://costthresholdalarm.duckdns.org/api/settings/";
+const AWS_REGION = "us-east-1";
 
 export default function Settings() {
   const [currency, setCurrency] = useState("INR");
-  const [region, setRegion] = useState("ap-south-1");
   const [monitoring, setMonitoring] = useState(true);
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState("60");
@@ -41,6 +41,8 @@ export default function Settings() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let active = true;
+
     const fetchSettings = async () => {
       try {
         setLoading(true);
@@ -54,19 +56,26 @@ export default function Settings() {
 
         const data = await response.json();
 
-        setCurrency(data.currency);
-        setRegion(data.region);
-        setMonitoring(data.monitoring);
-        setEmailAlerts(data.email_alerts);
-        setRefreshInterval(String(data.refresh_interval));
+        if (!active) return;
+
+        setCurrency(data.currency || "INR");
+        setMonitoring(data.monitoring ?? true);
+        setEmailAlerts(data.email_alerts ?? true);
+        setRefreshInterval(String(data.refresh_interval || 60));
       } catch (err) {
-        setError(err.message || "Could not connect to the backend.");
+        if (active) {
+          setError(err.message || "Could not connect to the backend.");
+        }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     fetchSettings();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleSave = async () => {
@@ -82,7 +91,7 @@ export default function Settings() {
         },
         body: JSON.stringify({
           currency,
-          region,
+          region: AWS_REGION,
           monitoring,
           email_alerts: emailAlerts,
           refresh_interval: Number(refreshInterval),
@@ -96,7 +105,6 @@ export default function Settings() {
       }
 
       setCurrency(data.currency);
-      setRegion(data.region);
       setMonitoring(data.monitoring);
       setEmailAlerts(data.email_alerts);
       setRefreshInterval(String(data.refresh_interval));
@@ -127,11 +135,7 @@ export default function Settings() {
   return (
     <Box>
       <Box sx={{ mb: 3 }}>
-        <Typography
-          variant="h4"
-          fontWeight={800}
-          sx={{ mb: 1 }}
-        >
+        <Typography variant="h4" fontWeight={800} sx={{ mb: 1 }}>
           Settings
         </Typography>
 
@@ -174,7 +178,7 @@ export default function Settings() {
                   </Typography>
 
                   <Typography variant="body2" color="text.secondary">
-                    Configure the AWS environment used for cost monitoring.
+                    AWS access is managed securely by the EC2 instance role.
                   </Typography>
                 </Box>
               </Stack>
@@ -184,45 +188,29 @@ export default function Settings() {
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12, md: 6 }}>
                   <TextField
-                    select
                     fullWidth
                     label="AWS Region"
-                    value={region}
-                    onChange={(event) => setRegion(event.target.value)}
-                  >
-                    <MenuItem value="ap-south-1">
-                      Asia Pacific (Mumbai)
-                    </MenuItem>
-
-                    <MenuItem value="us-east-1">
-                      US East (N. Virginia)
-                    </MenuItem>
-
-                    <MenuItem value="us-west-2">
-                      US West (Oregon)
-                    </MenuItem>
-
-                    <MenuItem value="eu-west-1">
-                      Europe (Ireland)
-                    </MenuItem>
-                  </TextField>
+                    value={AWS_REGION}
+                    disabled
+                    helperText="Configured by the backend environment."
+                  />
                 </Grid>
 
                 <Grid size={{ xs: 12, md: 6 }}>
                   <TextField
                     fullWidth
-                    label="AWS Account ID"
-                    placeholder="Configured securely in backend"
+                    label="AWS Credentials"
+                    value="EC2 IAM Instance Role (LabRole)"
                     disabled
-                    helperText="Account credentials must never be stored in frontend code."
+                    helperText="No AWS access keys are stored in the frontend."
                   />
                 </Grid>
               </Grid>
 
               <Box sx={{ mt: 2 }}>
                 <Chip
-                  label="AWS connection not configured"
-                  color="warning"
+                  label="Backend-managed AWS access"
+                  color="success"
                   variant="outlined"
                   size="small"
                 />
@@ -312,7 +300,9 @@ export default function Settings() {
                 control={
                   <Switch
                     checked={monitoring}
-                    onChange={(event) => setMonitoring(event.target.checked)}
+                    onChange={(event) =>
+                      setMonitoring(event.target.checked)
+                    }
                     color="warning"
                   />
                 }
@@ -333,7 +323,9 @@ export default function Settings() {
                 control={
                   <Switch
                     checked={emailAlerts}
-                    onChange={(event) => setEmailAlerts(event.target.checked)}
+                    onChange={(event) =>
+                      setEmailAlerts(event.target.checked)
+                    }
                     color="warning"
                   />
                 }
@@ -436,11 +428,11 @@ export default function Settings() {
               </Typography>
 
               <Typography variant="body2" color="text.secondary">
-                Planned cloud integration: AWS Cost Explorer, Lambda and SNS
+                Backend: FastAPI, AWS Cost Explorer, IAM and SNS
               </Typography>
 
               <Chip
-                label="Development Version"
+                label="AWS Academy Environment"
                 size="small"
                 sx={{
                   mt: 2,

@@ -1,88 +1,81 @@
 
-import sqlite3
-from pathlib import Path
+from datetime import date, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-router = APIRouter(
-    prefix="/api/spending-history",
-    tags=["Spending History"],
-)
+from app.services.aws_cost_service import get_cost_and_usage
+from app.services.cost_formatting import get_service_category
 
-DATABASE_PATH = Path(__file__).resolve().parents[2] / "spending_history.db"
-
-
-def get_connection():
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def initialize_database():
-    with get_connection() as connection:
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS spending_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                service TEXT NOT NULL,
-                category TEXT NOT NULL,
-                amount REAL NOT NULL,
-                date TEXT NOT NULL,
-                description TEXT NOT NULL
-            )
-        """)
-
-        count = connection.execute(
-            "SELECT COUNT(*) FROM spending_records"
-        ).fetchone()[0]
-
-        if count == 0:
-            connection.executemany(
-                """
-                INSERT INTO spending_records
-                (service, category, amount, date, description)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                [
-                    ("Amazon EC2", "Compute", 32.50, "2026-11-13", "Instance usage"),
-                    ("Amazon S3", "Storage", 14.20, "2026-11-12", "Storage and requests"),
-                    ("AWS Lambda", "Compute", 9.70, "2026-11-11", "Function invocations"),
-                    ("Amazon RDS", "Database", 7.50, "2026-11-10", "Database usage"),
-                    ("Amazon CloudWatch", "Monitoring", 2.80, "2026-11-09", "Logs and monitoring"),
-                    ("Amazon SNS", "Notifications", 1.70, "2026-11-08", "Notification usage"),
-                ],
-            )
-
-
-initialize_database()
+router = APIRouter()
 
 
 @router.get("/")
 def get_spending_history():
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT * FROM spending_records
-            ORDER BY date DESC, id DESC
-            """
-        ).fetchall()
+    today = date.today()
+    start_date = today - timedelta(days=29)
+    end_date = today + timedelta(days=1)
 
-    records = [dict(row) for row in rows]
+    try:
+        data = get_cost_and_usage(
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            granularity="DAILY",
+            group_by_service=True,
+        )
 
-    total = sum(record["amount"] for record in records)
+        records = []
+        estimated = False
 
-    highest = max(
-        records,
-        key=lambda record: record["amount"],
-        default=None,
-    )
+        for result in data["results"]:
+            estimated = estimated or result["estimated"]
 
-    average = total / len(records) if records else 0
+            for group in result["groups"]:
+                amount = max(0.0, group["amount"])
 
-    return {
-        "source": "demo",
-        "total_spending": round(total, 2),
-        "record_count": len(records),
-        "average_spending": round(average, 2),
-        "highest_record": highest,
-        "records": records,
-    }
+                if amount <= 0:
+                    continue
+
+                service = group["name"]
+                record_date = result["start_date"]
+
+                records.append({
+                    "id": f"{record_date}-{service}",
+                    "service": service,
+                    "category": get_service_category(service),
+                    "amount": round(amount, 4),
+                    "date": record_date,
+                    "description": "AWS Cost Explorer service charge",
+                })
+
+        records.sort(
+            key=lambda item: (item["date"], item["amount"]),
+            reverse=True,
+        )
+
+        total_spending = sum(item["amount"] for item in records)
+
+        highest_record = (
+            max(records, key=lambda item: item["amount"])
+            if records else None
+        )
+
+        return {
+            "source": data["source"],
+            "currency": data["currency"],
+            "start_date": start_date.isoformat(),
+            "end_date": today.isoformat(),
+            "estimated": estimated,
+            "total_spending": round(total_spending, 4),
+            "record_count": len(records),
+            "average_spending": round(
+                total_spending / len(records), 4
+            ) if records else 0,
+            "highest_record": highest_record,
+            "records": records,
+        }
+
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        )

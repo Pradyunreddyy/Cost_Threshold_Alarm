@@ -61,22 +61,6 @@ def initialize_database():
             WHERE created_at IS NULL OR created_at = ''
         """)
 
-        count = connection.execute(
-            "SELECT COUNT(*) FROM budgets"
-        ).fetchone()[0]
-
-        if count == 0:
-            connection.executemany(
-                """
-                INSERT INTO budgets (name, amount, spent, period)
-                VALUES (?, ?, ?, ?)
-                """,
-                [
-                    ("Monthly AWS Budget", 100, 68.4, "Monthly"),
-                    ("Daily Spending Limit", 10, 4.2, "Daily"),
-                ],
-            )
-
 
 initialize_database()
 
@@ -99,12 +83,53 @@ class BudgetUpdate(BudgetCreate):
 
 @router.get("/")
 def get_budgets():
-    with get_connection() as connection:
-        rows = connection.execute(
-            "SELECT * FROM budgets ORDER BY id"
-        ).fetchall()
+    """
+    Return budgets with actual AWS spending.
 
-        return [dict(row) for row in rows]
+    This endpoint does not generate alerts or send emails.
+    """
+
+    with get_connection() as connection:
+        budgets = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT * FROM budgets ORDER BY id"
+            ).fetchall()
+        ]
+
+    updated_budgets = []
+
+    for budget in budgets:
+        try:
+            spending = calculate_budget_spending(budget)
+
+            budget["spent"] = spending["spent"]
+
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    UPDATE budgets
+                    SET spent = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        spending["spent"],
+                        budget["id"],
+                    ),
+                )
+
+            updated_budgets.append(budget)
+
+        except (RuntimeError, ValueError, KeyError) as error:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Unable to retrieve actual spending for "
+                    f"budget '{budget['name']}': {error}"
+                ),
+            )
+
+    return updated_budgets
 
 
 @router.post("/", status_code=201)

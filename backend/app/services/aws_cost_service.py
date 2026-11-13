@@ -1,61 +1,105 @@
 
 import os
-from datetime import date
 
 import boto3
-from dotenv import load_dotenv
 from botocore.exceptions import ClientError, BotoCoreError
-
-# Load credentials from backend/.env
-load_dotenv()
 
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
 
 def get_cost_explorer_client():
-    """Create an AWS Cost Explorer client using environment credentials."""
-    return boto3.client(
-        "ce",
-        region_name=AWS_REGION,
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        aws_session_token=os.getenv("AWS_SESSION_TOKEN"),
-    )
-
-
-def get_cost_and_usage(start_date: str, end_date: str,
-                       granularity: str = "DAILY"):
     """
-    Retrieve actual AWS spending from Cost Explorer.
+    Use boto3's standard credential chain.
 
-    end_date is exclusive, as required by AWS Cost Explorer.
+    On EC2, this uses the attached IAM instance role.
+    Locally, it can use environment credentials or an AWS profile.
     """
+    return boto3.client("ce", region_name=AWS_REGION)
+
+
+def get_cost_and_usage(
+    start_date: str,
+    end_date: str,
+    granularity: str = "DAILY",
+    group_by_service: bool = False,
+):
+    """
+    Retrieve actual AWS Cost Explorer spending.
+
+    The end date is exclusive.
+    Optionally group costs by AWS service.
+    """
+
+    if start_date >= end_date:
+        raise ValueError("Start date must be earlier than end date.")
+
+    if granularity not in ("DAILY", "MONTHLY"):
+        raise ValueError("Unsupported Cost Explorer granularity.")
+
     try:
         client = get_cost_explorer_client()
 
-        response = client.get_cost_and_usage(
-            TimePeriod={
+        params = {
+            "TimePeriod": {
                 "Start": start_date,
                 "End": end_date,
             },
-            Granularity=granularity,
-            Metrics=["UnblendedCost"],
-        )
+            "Granularity": granularity,
+            "Metrics": ["UnblendedCost"],
+        }
+
+        if group_by_service:
+            params["GroupBy"] = [
+                {
+                    "Type": "DIMENSION",
+                    "Key": "SERVICE",
+                }
+            ]
 
         results = []
 
-        for item in response.get("ResultsByTime", []):
-            cost_data = item.get("Total", {}).get(
-                "UnblendedCost", {}
-            )
+        while True:
+            response = client.get_cost_and_usage(**params)
 
-            results.append({
-                "start_date": item["TimePeriod"]["Start"],
-                "end_date": item["TimePeriod"]["End"],
-                "amount": float(cost_data.get("Amount", 0)),
-                "unit": cost_data.get("Unit", "USD"),
-                "estimated": item.get("Estimated", False),
-            })
+            for item in response.get("ResultsByTime", []):
+                cost_data = item.get("Total", {}).get(
+                    "UnblendedCost", {}
+                )
+
+                groups = []
+
+                for group in item.get("Groups", []):
+                    group_cost = group.get("Metrics", {}).get(
+                        "UnblendedCost", {}
+                    )
+
+                    keys = group.get("Keys", [])
+
+                    groups.append({
+                        "name": keys[0] if keys else "Other",
+                        "amount": float(
+                            group_cost.get("Amount", 0)
+                        ),
+                        "unit": group_cost.get("Unit", "USD"),
+                    })
+
+                results.append({
+                    "start_date": item["TimePeriod"]["Start"],
+                    "end_date": item["TimePeriod"]["End"],
+                    "amount": float(
+                        cost_data.get("Amount", 0)
+                    ),
+                    "unit": cost_data.get("Unit", "USD"),
+                    "estimated": item.get("Estimated", False),
+                    "groups": groups,
+                })
+
+            next_token = response.get("NextPageToken")
+
+            if not next_token:
+                break
+
+            params["NextPageToken"] = next_token
 
         return {
             "source": "aws_cost_explorer",

@@ -1,67 +1,146 @@
 
-from fastapi import APIRouter
+from datetime import date, timedelta
+import calendar
 
-router = APIRouter(prefix="/api/analytics", tags=["Cost Analytics"])
+from fastapi import APIRouter, HTTPException, Query
 
-CHART_DATA = {
-    "Last 7 days": {
-        "labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-        "values": [8, 12, 9, 15, 11, 7, 6.4],
-    },
-    "Last 30 days": {
-        "labels": ["Week 1", "Week 2", "Week 3", "Week 4"],
-        "values": [35, 48, 42, 68.4],
-    },
-    "Last 3 months": {
-        "labels": ["Month 1", "Month 2", "Month 3"],
-        "values": [120, 145, 168.4],
-    },
-    "Last 6 months": {
-        "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-        "values": [80, 95, 110, 125, 140, 168.4],
-    },
-    "Last 12 months": {
-        "labels": ["Jan", "Mar", "May", "Jul", "Sep", "Nov"],
-        "values": [60, 75, 90, 110, 135, 168.4],
-    },
-}
+from app.services.aws_cost_service import get_cost_and_usage
 
-SERVICES = [
-    {"name": "Amazon EC2", "cost": 32.5},
-    {"name": "Amazon S3", "cost": 14.2},
-    {"name": "AWS Lambda", "cost": 9.7},
-    {"name": "Amazon RDS", "cost": 7.5},
-    {"name": "Other Services", "cost": 4.5},
-]
+router = APIRouter()
+
+
+def subtract_months(value: date, months: int) -> date:
+    month_index = value.year * 12 + value.month - 1 - months
+    year = month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, 1)
 
 
 @router.get("/")
-def get_cost_analytics(period: str = "Last 30 days"):
-    selected_data = CHART_DATA.get(
-        period,
-        CHART_DATA["Last 30 days"],
-    )
+def get_analytics(
+    period: str = Query(default="Last 30 days"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+):
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
 
-    total = sum(service["cost"] for service in SERVICES)
+    if period == "Last 7 days":
+        start = today - timedelta(days=6)
+        end = tomorrow
+        granularity = "DAILY"
 
-    average = (
-        total / len(selected_data["values"])
-        if selected_data["values"]
-        else 0
-    )
+    elif period == "Last 30 days":
+        start = today - timedelta(days=29)
+        end = tomorrow
+        granularity = "DAILY"
 
-    highest_service = max(
-        SERVICES,
-        key=lambda service: service["cost"],
-    )
+    elif period == "Last 3 months":
+        start = subtract_months(today, 2)
+        end = tomorrow
+        granularity = "MONTHLY"
 
-    return {
-        "source": "demo",
-        "period": period,
-        "labels": selected_data["labels"],
-        "values": selected_data["values"],
-        "services": SERVICES,
-        "total_spending": round(total, 2),
-        "average_spending": round(average, 2),
-        "highest_service": highest_service,
-    }
+    elif period == "Last 6 months":
+        start = subtract_months(today, 5)
+        end = tomorrow
+        granularity = "MONTHLY"
+
+    elif period == "Last 12 months":
+        start = subtract_months(today, 11)
+        end = tomorrow
+        granularity = "MONTHLY"
+
+    elif period == "Custom":
+        if start_date is None or end_date is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Custom period requires start_date and end_date.",
+            )
+
+        if start_date > end_date:
+            raise HTTPException(
+                status_code=400,
+                detail="Start date must not be after end date.",
+            )
+
+        start = start_date
+        end = end_date + timedelta(days=1)
+
+        granularity = (
+            "DAILY"
+            if (end - start).days <= 90
+            else "MONTHLY"
+        )
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported analytics period.",
+        )
+
+    try:
+        data = get_cost_and_usage(
+            start_date=start.isoformat(),
+            end_date=end.isoformat(),
+            granularity=granularity,
+            group_by_service=True,
+        )
+
+        labels = []
+        values = []
+        service_totals = {}
+        estimated = False
+
+        for result in data["results"]:
+            result_date = date.fromisoformat(result["start_date"])
+
+            if granularity == "DAILY":
+                labels.append(result_date.strftime("%b %d"))
+            else:
+                labels.append(result_date.strftime("%b %Y"))
+
+            values.append(max(0.0, result["amount"]))
+            estimated = estimated or result["estimated"]
+
+            for group in result["groups"]:
+                name = group["name"]
+                service_totals[name] = (
+                    service_totals.get(name, 0) + group["amount"]
+                )
+
+        services = [
+            {
+                "name": name,
+                "cost": round(max(0.0, amount), 4),
+            }
+            for name, amount in service_totals.items()
+            if amount > 0
+        ]
+
+        services.sort(key=lambda item: item["cost"], reverse=True)
+
+        total_spending = sum(values)
+        average_spending = (
+            total_spending / len(values) if values else 0
+        )
+
+        return {
+            "source": data["source"],
+            "currency": data["currency"],
+            "period": period,
+            "start_date": start.isoformat(),
+            "end_date": (end - timedelta(days=1)).isoformat(),
+            "estimated": estimated,
+            "labels": labels,
+            "values": [round(value, 4) for value in values],
+            "services": services,
+            "total_spending": round(total_spending, 4),
+            "average_spending": round(average_spending, 4),
+            "highest_service": services[0] if services else None,
+        }
+
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        )

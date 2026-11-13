@@ -24,7 +24,7 @@ import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
 import EmailRounded from "@mui/icons-material/EmailRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 
-const API_URL = "https://cost-threshold-alarm-backend.onrender.com/api/alerts";
+const API_URL = "https://costthresholdalarm.duckdns.org/api/alerts";
 
 const initialAlerts = [
   {

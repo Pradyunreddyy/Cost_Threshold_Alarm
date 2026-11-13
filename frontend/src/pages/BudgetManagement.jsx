@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   Box,
@@ -26,13 +26,25 @@ import Add from "@mui/icons-material/Add";
 import Delete from "@mui/icons-material/Delete";
 import EditOutlined from "@mui/icons-material/EditOutlined";
 
-const API_URL = "https://cost-threshold-alarm-backend.onrender.com/api/budgets/";
+import {
+  loadCurrencySettings,
+  formatMoney,
+} from "../services/currency";
+
+const API_URL = "https://costthresholdalarm.duckdns.org/api/budgets/";
 
 export default function BudgetManagement() {
   const [budgets, setBudgets] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const [currencyInfo, setCurrencyInfo] = useState({
+    currency: "USD",
+    rate: 1,
+    warning: "",
+  });
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -43,7 +55,7 @@ export default function BudgetManagement() {
 
   const [notification, setNotification] = useState("");
 
-  const loadBudgets = async () => {
+  const loadBudgets = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -51,21 +63,53 @@ export default function BudgetManagement() {
       const response = await fetch(API_URL);
 
       if (!response.ok) {
-        throw new Error("Unable to load budgets.");
+        let message = "Unable to load budgets.";
+
+        try {
+          const errorData = await response.json();
+          message = errorData.detail || message;
+        } catch {
+          // Keep the default message.
+        }
+
+        throw new Error(message);
       }
 
       const data = await response.json();
+
+      if (!Array.isArray(data)) {
+        throw new Error("Unexpected budget data received from backend.");
+      }
+
       setBudgets(data);
     } catch (err) {
+      setBudgets([]);
       setError(err.message || "Backend connection failed.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadBudgets();
-  }, []);
+    let active = true;
+
+    const initialize = async () => {
+      const [currency, budgetResult] = await Promise.all([
+        loadCurrencySettings(),
+        loadBudgets(),
+      ]);
+
+      if (active) {
+        setCurrencyInfo(currency);
+      }
+    };
+
+    initialize();
+
+    return () => {
+      active = false;
+    };
+  }, [loadBudgets]);
 
   const resetForm = () => {
     setName("");
@@ -78,6 +122,7 @@ export default function BudgetManagement() {
   const saveBudget = async () => {
     if (
       !name.trim() ||
+      amount.trim() === "" ||
       !Number.isFinite(Number(amount)) ||
       Number(amount) <= 0
     ) {
@@ -90,6 +135,8 @@ export default function BudgetManagement() {
     try {
       setSaving(true);
 
+      // Budget amounts are stored in USD in the backend.
+      // Currency conversion is only for display.
       const budgetData = {
         name: name.trim(),
         amount: Number(amount),
@@ -109,7 +156,16 @@ export default function BudgetManagement() {
       });
 
       if (!response.ok) {
-        throw new Error("Unable to save budget.");
+        let message = "Unable to save budget.";
+
+        try {
+          const errorData = await response.json();
+          message = errorData.detail || message;
+        } catch {
+          // Keep the default message.
+        }
+
+        throw new Error(message);
       }
 
       await loadBudgets();
@@ -152,8 +208,10 @@ export default function BudgetManagement() {
     }
   };
 
+  const { currency, rate, warning } = currencyInfo;
+
   return (
-    <Box>
+    <Box sx={{ width: "100%", minWidth: 0 }}>
       <Box
         sx={{
           display: "flex",
@@ -165,7 +223,7 @@ export default function BudgetManagement() {
         }}
       >
         <Box>
-          <Typography variant="h5">
+          <Typography variant="h5" fontWeight={700}>
             Budget Management
           </Typography>
 
@@ -183,6 +241,17 @@ export default function BudgetManagement() {
         </Button>
       </Box>
 
+      {warning && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {warning}
+        </Alert>
+      )}
+
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Budget amounts are stored in USD. Display values are converted to{" "}
+        {currency} using the retrieved exchange rate.
+      </Alert>
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -190,14 +259,8 @@ export default function BudgetManagement() {
       )}
 
       {loading ? (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            py: 6,
-          }}
-        >
-          <CircularProgress />
+        <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+          <CircularProgress sx={{ color: "#EC5E27" }} />
         </Box>
       ) : budgets.length === 0 ? (
         <Alert severity="info">
@@ -205,37 +268,59 @@ export default function BudgetManagement() {
         </Alert>
       ) : (
         <Grid container spacing={2.5}>
-          {budgets.map((b) => {
-            const percent = Math.min(
-              (b.spent / b.amount) * 100,
-              100
+          {budgets.map((budget) => {
+            const budgetAmount = Math.max(
+              0,
+              Number(budget.amount) || 0
             );
 
+            const spent = Math.max(
+              0,
+              Number(budget.spent) || 0
+            );
+
+            const remaining = budgetAmount - spent;
+
+            const percent =
+              budgetAmount > 0
+                ? (spent / budgetAmount) * 100
+                : 0;
+
+            const progress = Math.min(percent, 100);
+            const isOverBudget = spent > budgetAmount;
+
             return (
-              <Grid size={{ xs: 12, md: 6 }} key={b.id}>
-                <Card>
+              <Grid size={{ xs: 12, md: 6 }} key={budget.id}>
+                <Card
+                  sx={{
+                    height: "100%",
+                    border: "1px solid #EEECE5",
+                    borderRadius: 3,
+                  }}
+                >
                   <CardContent sx={{ p: 3 }}>
                     <Box
                       sx={{
                         display: "flex",
                         justifyContent: "space-between",
+                        gap: 1,
                       }}
                     >
-                      <Box>
-                        <Typography variant="h6">
-                          {b.name}
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="h6" fontWeight={700}>
+                          {budget.name}
                         </Typography>
 
                         <Chip
                           size="small"
-                          label={b.period}
+                          label={budget.period}
                           sx={{ mt: 1 }}
                         />
                       </Box>
 
-                      <Box>
+                      <Box sx={{ flexShrink: 0 }}>
                         <IconButton
-                          onClick={() => editBudget(b)}
+                          onClick={() => editBudget(budget)}
                           aria-label="Edit budget"
                         >
                           <EditOutlined />
@@ -243,7 +328,7 @@ export default function BudgetManagement() {
 
                         <IconButton
                           color="error"
-                          onClick={() => deleteBudget(b.id)}
+                          onClick={() => deleteBudget(budget.id)}
                           aria-label="Delete budget"
                         >
                           <Delete />
@@ -254,15 +339,12 @@ export default function BudgetManagement() {
                     <Typography
                       variant="h4"
                       fontWeight={700}
-                      sx={{ mt: 3 }}
+                      sx={{ mt: 3, overflowWrap: "anywhere" }}
                     >
-                      ${Number(b.amount).toFixed(2)}
+                      {formatMoney(budgetAmount, currency, rate)}
                     </Typography>
 
-                    <Typography
-                      color="text.secondary"
-                      variant="body2"
-                    >
+                    <Typography color="text.secondary" variant="body2">
                       Budget limit
                     </Typography>
 
@@ -270,32 +352,43 @@ export default function BudgetManagement() {
                       sx={{
                         display: "flex",
                         justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: 1,
                         mt: 3,
                         mb: 1,
                       }}
                     >
                       <Typography variant="body2">
-                        Spent: ${Number(b.spent).toFixed(2)}
+                        Spent: {formatMoney(spent, currency, rate)}
                       </Typography>
 
-                      <Typography variant="body2">
+                      <Typography
+                        variant="body2"
+                        fontWeight={600}
+                        color={isOverBudget ? "error.main" : "text.primary"}
+                      >
                         {percent.toFixed(1)}%
                       </Typography>
                     </Box>
 
                     <LinearProgress
                       variant="determinate"
-                      value={percent}
+                      value={progress}
+                      color={isOverBudget ? "error" : "primary"}
                       sx={{ height: 9, borderRadius: 5 }}
                     />
 
                     <Typography
-                      color="text.secondary"
+                      color={isOverBudget ? "error.main" : "text.secondary"}
                       variant="body2"
                       sx={{ mt: 1 }}
                     >
-                      Remaining: $
-                      {(Number(b.amount) - Number(b.spent)).toFixed(2)}
+                      {isOverBudget ? "Over budget: " : "Remaining: "}
+                      {formatMoney(
+                        Math.abs(remaining),
+                        currency,
+                        rate
+                      )}
                     </Typography>
                   </CardContent>
                 </Card>
@@ -307,7 +400,7 @@ export default function BudgetManagement() {
 
       <Dialog
         open={open}
-        onClose={resetForm}
+        onClose={saving ? undefined : resetForm}
         fullWidth
         maxWidth="sm"
       >
@@ -320,17 +413,24 @@ export default function BudgetManagement() {
             fullWidth
             label="Budget Name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(event) => setName(event.target.value)}
             margin="normal"
           />
 
           <TextField
             fullWidth
-            label="Budget Amount ($)"
+            label="Budget Amount (USD)"
             type="number"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(event) => setAmount(event.target.value)}
             margin="normal"
+            slotProps={{
+              htmlInput: {
+                min: 0,
+                step: "0.01",
+              },
+            }}
+            helperText="Enter the budget limit in USD. It will be converted for display."
           />
 
           <TextField
@@ -338,13 +438,13 @@ export default function BudgetManagement() {
             select
             label="Budget Period"
             value={period}
-            onChange={(e) => setPeriod(e.target.value)}
+            onChange={(event) => setPeriod(event.target.value)}
             margin="normal"
           >
             {["Daily", "Weekly", "Monthly", "Yearly", "No Deadline"].map(
-              (p) => (
-                <MenuItem key={p} value={p}>
-                  {p}
+              (item) => (
+                <MenuItem key={item} value={item}>
+                  {item}
                 </MenuItem>
               )
             )}

@@ -13,12 +13,19 @@ import {
   Stack,
   CircularProgress,
   Alert,
+  Button,
 } from "@mui/material";
 
 import { LineChart } from "@mui/x-charts/LineChart";
 import { BarChart } from "@mui/x-charts/BarChart";
 
-const API_URL = "https://cost-threshold-alarm-backend.onrender.com/api/analytics/";
+import {
+  loadCurrencySettings,
+  formatMoney,
+  convertAmount,
+} from "../services/currency";
+
+const API_URL = "https://costthresholdalarm.duckdns.org/api/analytics/";
 
 const periods = [
   "Last 7 days",
@@ -29,47 +36,89 @@ const periods = [
   "Custom",
 ];
 
+function getLocalDateString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 export default function CostAnalytics() {
   const [period, setPeriod] = useState("Last 30 days");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
   const [analytics, setAnalytics] = useState(null);
+  const [currencyInfo, setCurrencyInfo] = useState({
+    currency: "USD",
+    rate: 1,
+    warning: "",
+  });
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [dateError, setDateError] = useState("");
 
   useEffect(() => {
-    let isMounted = true;
+    if (period === "Custom") {
+      if (!startDate || !endDate) {
+        setLoading(false);
+        setAnalytics(null);
+        setError("");
+        setDateError("Select both dates to view custom analytics.");
+        return;
+      }
+
+      if (startDate > endDate) {
+        setLoading(false);
+        setAnalytics(null);
+        setDateError("Start date must be earlier than or equal to end date.");
+        return;
+      }
+    }
+
+    const controller = new AbortController();
 
     const fetchAnalytics = async () => {
       try {
         setLoading(true);
         setError("");
+        setDateError("");
 
-        const selectedPeriod =
-          period === "Custom" ? "Last 30 days" : period;
+        const query = new URLSearchParams({ period });
 
-        const query = new URLSearchParams({
-          period: selectedPeriod,
-        });
-
-        const response = await fetch(`${API_URL}?${query.toString()}`);
-
-        if (!response.ok) {
-          throw new Error("Unable to load cost analytics.");
+        if (period === "Custom") {
+          query.set("start_date", startDate);
+          query.set("end_date", endDate);
         }
 
-        const data = await response.json();
+        const [analyticsResponse, currency] = await Promise.all([
+          fetch(`${API_URL}?${query.toString()}`, {
+            signal: controller.signal,
+          }),
+          loadCurrencySettings(),
+        ]);
 
-        if (isMounted) {
-          setAnalytics(data);
+        if (!analyticsResponse.ok) {
+          throw new Error(
+            analyticsResponse.status === 502
+              ? "AWS Cost Explorer could not retrieve spending data."
+              : "Unable to load cost analytics."
+          );
         }
+
+        const data = await analyticsResponse.json();
+
+        setAnalytics(data);
+        setCurrencyInfo(currency);
       } catch (err) {
-        if (isMounted) {
+        if (err.name !== "AbortError") {
+          setAnalytics(null);
           setError(err.message || "Analytics backend connection failed.");
         }
       } finally {
-        if (isMounted) {
+        if (!controller.signal.aborted) {
           setLoading(false);
         }
       }
@@ -77,45 +126,72 @@ export default function CostAnalytics() {
 
     fetchAnalytics();
 
-    return () => {
-      isMounted = false;
-    };
-  }, [period]);
+    return () => controller.abort();
+  }, [period, startDate, endDate]);
 
-  const services = analytics?.services || [];
-  const labels = analytics?.labels || [];
-  const values = analytics?.values || [];
+  const services = Array.isArray(analytics?.services)
+    ? analytics.services
+    : [];
 
-  const total = Number(analytics?.total_spending || 0);
-  const average = Number(analytics?.average_spending || 0);
+  const labels = Array.isArray(analytics?.labels)
+    ? analytics.labels
+    : [];
+
+  const values = Array.isArray(analytics?.values)
+    ? analytics.values
+    : [];
+
+  const rate = currencyInfo.rate;
+
+  const total = Math.max(0, Number(analytics?.total_spending || 0));
+  const average = Math.max(0, Number(analytics?.average_spending || 0));
 
   const highestService = analytics?.highest_service;
 
   const summaryCards = [
     {
       title: "Total Cloud Spending",
-      value: `$${total.toFixed(2)}`,
-      subtitle: "Current demo spending",
+      value: formatMoney(total, currencyInfo.currency, rate),
+      subtitle: "Actual AWS Cost Explorer spending",
       color: "#EC5E27",
     },
     {
       title: "Average Spending",
-      value: `$${average.toFixed(2)}`,
+      value: formatMoney(average, currencyInfo.currency, rate),
       subtitle: "Average per chart interval",
       color: "#3B82F6",
     },
     {
       title: "Highest Service Cost",
-      value: `$${Number(highestService?.cost || 0).toFixed(2)}`,
+      value: formatMoney(
+        highestService?.cost || 0,
+        currencyInfo.currency,
+        rate
+      ),
       subtitle: highestService?.name || "No service data",
       color: "#16A34A",
     },
   ];
 
+  const chartValues = values.map((value) =>
+    convertAmount(Math.max(0, Number(value) || 0), rate)
+  );
+
+  const chartServices = services.map((service) => ({
+    ...service,
+    displayCost: convertAmount(
+      Math.max(0, Number(service.cost) || 0),
+      rate
+    ),
+  }));
+
+  const serviceTotal = chartServices.reduce(
+    (sum, service) => sum + service.displayCost,
+    0
+  );
+
   return (
     <Box sx={{ width: "100%", minWidth: 0 }}>
-      {/* PAGE HEADER */}
-
       <Box
         sx={{
           display: "flex",
@@ -132,7 +208,7 @@ export default function CostAnalytics() {
           </Typography>
 
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Understand your cloud spending patterns and trends.
+            Understand your actual AWS cloud spending patterns and trends.
           </Typography>
         </Box>
 
@@ -141,18 +217,16 @@ export default function CostAnalytics() {
           size="small"
           label="Date Range"
           value={period}
-          onChange={(e) => setPeriod(e.target.value)}
+          onChange={(event) => setPeriod(event.target.value)}
           sx={{ minWidth: 190 }}
         >
-          {periods.map((p) => (
-            <MenuItem key={p} value={p}>
-              {p}
+          {periods.map((item) => (
+            <MenuItem key={item} value={item}>
+              {item}
             </MenuItem>
           ))}
         </TextField>
       </Box>
-
-      {/* CUSTOM DATE FILTER */}
 
       {period === "Custom" && (
         <Card sx={{ mb: 3 }}>
@@ -164,15 +238,17 @@ export default function CostAnalytics() {
             <Stack
               direction={{ xs: "column", sm: "row" }}
               spacing={2}
+              alignItems={{ sm: "center" }}
             >
               <TextField
                 type="date"
                 label="Start Date"
                 size="small"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(event) => setStartDate(event.target.value)}
                 slotProps={{
                   inputLabel: { shrink: true },
+                  htmlInput: { max: getLocalDateString(new Date()) },
                 }}
               />
 
@@ -181,29 +257,31 @@ export default function CostAnalytics() {
                 label="End Date"
                 size="small"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={(event) => setEndDate(event.target.value)}
                 slotProps={{
                   inputLabel: { shrink: true },
+                  htmlInput: {
+                    min: startDate || undefined,
+                    max: getLocalDateString(new Date()),
+                  },
                 }}
               />
             </Stack>
 
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{
-                display: "block",
-                mt: 2,
-              }}
-            >
-              Custom date filtering is not yet implemented. The dashboard
-              currently displays the Last 30 days demo dataset.
-            </Typography>
+            {dateError && (
+              <Alert severity="info" sx={{ mt: 2 }}>
+                {dateError}
+              </Alert>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {/* LOADING AND ERROR STATES */}
+      {currencyInfo.warning && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {currencyInfo.warning}
+        </Alert>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -219,16 +297,12 @@ export default function CostAnalytics() {
             py: 5,
           }}
         >
-          <CircularProgress />
+          <CircularProgress sx={{ color: "#EC5E27" }} />
         </Box>
       )}
 
-      {/* ANALYTICS CONTENT */}
-
-      {!loading && analytics && (
+      {!loading && analytics && !error && (
         <>
-          {/* SUMMARY CARDS */}
-
           <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
             {summaryCards.map((card) => (
               <Grid size={{ xs: 12, sm: 6, md: 4 }} key={card.title}>
@@ -242,10 +316,7 @@ export default function CostAnalytics() {
                   <CardContent sx={{ p: 3 }}>
                     <Typography
                       color="text.secondary"
-                      sx={{
-                        fontSize: 14,
-                        fontWeight: 500,
-                      }}
+                      sx={{ fontSize: 14, fontWeight: 500 }}
                     >
                       {card.title}
                     </Typography>
@@ -253,15 +324,16 @@ export default function CostAnalytics() {
                     <Typography
                       variant="h4"
                       fontWeight={800}
-                      sx={{ color: card.color, my: 1.5 }}
+                      sx={{
+                        color: card.color,
+                        my: 1.5,
+                        overflowWrap: "anywhere",
+                      }}
                     >
                       {card.value}
                     </Typography>
 
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                    >
+                    <Typography variant="body2" color="text.secondary">
                       {card.subtitle}
                     </Typography>
                   </CardContent>
@@ -269,8 +341,6 @@ export default function CostAnalytics() {
               </Grid>
             ))}
           </Grid>
-
-          {/* SPENDING TREND */}
 
           <Card
             sx={{
@@ -296,64 +366,66 @@ export default function CostAnalytics() {
                   </Typography>
 
                   <Typography variant="body2" color="text.secondary">
-                    Cloud spending over {period.toLowerCase()}
+                    AWS spending over {period.toLowerCase()}
                   </Typography>
                 </Box>
 
                 <Chip
-                  label="Demo Data"
-                  color="warning"
+                  label="AWS Cost Explorer"
+                  color="success"
                   size="small"
                   variant="outlined"
                 />
               </Box>
 
-              <Box sx={{ width: "100%", minWidth: 0 }}>
-                <LineChart
-                  height={340}
-                  xAxis={[
-                    {
-                      scaleType: "point",
-                      data: labels,
-                    },
-                  ]}
-                  series={[
-                    {
-                      data: values,
-                      label: "Cloud Spending ($)",
-                      area: true,
-                      showMark: true,
-                      color: "#EC5E27",
-                      curve: "monotoneX",
-                    },
-                  ]}
-                  yAxis={[
-                    {
-                      width: 65,
-                    },
-                  ]}
-                  margin={{
-                    left: 15,
-                    right: 30,
-                    top: 25,
-                    bottom: 35,
-                  }}
-                  grid={{ horizontal: true }}
-                  slotProps={{
-                    legend: {
-                      direction: "horizontal",
-                      position: {
-                        vertical: "top",
-                        horizontal: "middle",
+              {labels.length > 0 && chartValues.length > 0 ? (
+                <Box sx={{ width: "100%", minWidth: 0 }}>
+                  <LineChart
+                    height={340}
+                    xAxis={[
+                      {
+                        scaleType: "point",
+                        data: labels,
                       },
-                    },
-                  }}
-                />
-              </Box>
+                    ]}
+                    series={[
+                      {
+                        data: chartValues,
+                        label: `Cloud Spending (${currencyInfo.currency})`,
+                        area: true,
+                        showMark: true,
+                        color: "#EC5E27",
+                        curve: "monotoneX",
+                        valueFormatter: (value) =>
+                          formatMoney(value, currencyInfo.currency),
+                      },
+                    ]}
+                    yAxis={[{ width: 75 }]}
+                    margin={{
+                      left: 15,
+                      right: 30,
+                      top: 25,
+                      bottom: 35,
+                    }}
+                    grid={{ horizontal: true }}
+                    slotProps={{
+                      legend: {
+                        direction: "horizontal",
+                        position: {
+                          vertical: "top",
+                          horizontal: "middle",
+                        },
+                      },
+                    }}
+                  />
+                </Box>
+              ) : (
+                <Alert severity="info">
+                  No spending trend data is available for this period.
+                </Alert>
+              )}
             </CardContent>
           </Card>
-
-          {/* AWS SERVICE BREAKDOWN */}
 
           <Card
             sx={{
@@ -372,44 +444,48 @@ export default function CostAnalytics() {
                 color="text.secondary"
                 sx={{ mb: 2 }}
               >
-                Compare spending across different AWS services.
+                Compare actual spending across AWS services.
               </Typography>
 
-              <Box sx={{ width: "100%", minWidth: 0 }}>
-                <BarChart
-                  height={350}
-                  xAxis={[
-                    {
-                      scaleType: "band",
-                      data: services.map((s) => s.name),
-                      tickLabelStyle: {
-                        fontSize: 12,
+              {chartServices.length > 0 ? (
+                <Box sx={{ width: "100%", minWidth: 0 }}>
+                  <BarChart
+                    height={350}
+                    xAxis={[
+                      {
+                        scaleType: "band",
+                        data: chartServices.map((service) => service.name),
+                        tickLabelStyle: { fontSize: 12 },
                       },
-                    },
-                  ]}
-                  series={[
-                    {
-                      data: services.map((s) => s.cost),
-                      label: "Service Cost ($)",
-                      color: "#EC5E27",
-                      valueFormatter: (value) =>
-                        `$${Number(value).toFixed(2)}`,
-                    },
-                  ]}
-                  yAxis={[{ width: 65 }]}
-                  margin={{
-                    left: 15,
-                    right: 30,
-                    top: 25,
-                    bottom: 65,
-                  }}
-                  grid={{ horizontal: true }}
-                />
-              </Box>
+                    ]}
+                    series={[
+                      {
+                        data: chartServices.map(
+                          (service) => service.displayCost
+                        ),
+                        label: `Service Cost (${currencyInfo.currency})`,
+                        color: "#EC5E27",
+                        valueFormatter: (value) =>
+                          formatMoney(value, currencyInfo.currency),
+                      },
+                    ]}
+                    yAxis={[{ width: 75 }]}
+                    margin={{
+                      left: 15,
+                      right: 30,
+                      top: 25,
+                      bottom: 65,
+                    }}
+                    grid={{ horizontal: true }}
+                  />
+                </Box>
+              ) : (
+                <Alert severity="info">
+                  No AWS service cost breakdown is available for this period.
+                </Alert>
+              )}
             </CardContent>
           </Card>
-
-          {/* SERVICE COST DETAILS */}
 
           <Card
             sx={{
@@ -418,57 +494,63 @@ export default function CostAnalytics() {
             }}
           >
             <CardContent sx={{ p: 3 }}>
-              <Typography
-                variant="h6"
-                fontWeight={700}
-                sx={{ mb: 2 }}
-              >
+              <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
                 Service Cost Details
               </Typography>
 
-              <Stack spacing={2}>
-                {services.map((service) => (
-                  <Box key={service.name}>
-                    <Box
-                      sx={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        mb: 0.8,
-                      }}
-                    >
-                      <Typography fontWeight={500}>
-                        {service.name}
-                      </Typography>
-
-                      <Typography fontWeight={700}>
-                        ${Number(service.cost).toFixed(2)}
-                      </Typography>
-                    </Box>
-
-                    <Box
-                      sx={{
-                        height: 8,
-                        bgcolor: "#F1E7E1",
-                        borderRadius: 5,
-                        overflow: "hidden",
-                      }}
-                    >
+              {chartServices.length === 0 ? (
+                <Typography color="text.secondary">
+                  No service cost details available.
+                </Typography>
+              ) : (
+                <Stack spacing={2}>
+                  {chartServices.map((service) => (
+                    <Box key={service.name}>
                       <Box
                         sx={{
-                          height: "100%",
-                          width: `${
-                            total > 0
-                              ? (service.cost / total) * 100
-                              : 0
-                          }%`,
-                          bgcolor: "#EC5E27",
-                          borderRadius: 5,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 2,
+                          mb: 0.8,
                         }}
-                      />
+                      >
+                        <Typography fontWeight={500}>
+                          {service.name}
+                        </Typography>
+
+                        <Typography fontWeight={700}>
+                          {formatMoney(
+                            service.displayCost,
+                            currencyInfo.currency
+                          )}
+                        </Typography>
+                      </Box>
+
+                      <Box
+                        sx={{
+                          height: 8,
+                          bgcolor: "#F1E7E1",
+                          borderRadius: 5,
+                          overflow: "hidden",
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            height: "100%",
+                            width: `${
+                              serviceTotal > 0
+                                ? (service.displayCost / serviceTotal) * 100
+                                : 0
+                            }%`,
+                            bgcolor: "#EC5E27",
+                            borderRadius: 5,
+                          }}
+                        />
+                      </Box>
                     </Box>
-                  </Box>
-                ))}
-              </Stack>
+                  ))}
+                </Stack>
+              )}
             </CardContent>
           </Card>
 
@@ -482,8 +564,10 @@ export default function CostAnalytics() {
               mb: 1,
             }}
           >
-            Analytics data is retrieved from FastAPI. All spending figures
-            are sample demonstration data, not actual AWS costs.
+            Source: {analytics.source || "AWS Cost Explorer"}.
+            AWS billing data may be delayed. Converted amounts use
+            exchange rates retrieved for display purposes.
+            {analytics.estimated ? " Some figures are estimated." : ""}
           </Typography>
         </>
       )}
