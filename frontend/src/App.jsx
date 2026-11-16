@@ -149,9 +149,36 @@ export default function App() {
             gap: 1.5,
           }}
         >
-          <CloudRounded
-            sx={{ color: "#EC5E27", fontSize: 43, flexShrink: 0 }}
-          />
+          <Box
+            sx={{
+              position: "relative",
+              width: 46,
+              height: 43,
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <CloudRounded sx={{ color: "#EC5E27", fontSize: 46 }} />
+            <Typography
+              sx={{
+                position: "absolute",
+                bottom: 6,
+                left: 0,
+                right: 0,
+                textAlign: "center",
+                fontSize: 7,
+                lineHeight: 1,
+                fontWeight: 800,
+                letterSpacing: 0.25,
+                color: "#292524",
+                pointerEvents: "none",
+              }}
+            >
+              cloud
+            </Typography>
+          </Box>
 
           {(!desktopCollapsed || isMobile) && (
             <Box>
