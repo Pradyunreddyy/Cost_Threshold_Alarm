@@ -33,7 +33,7 @@ import {
 
 const API_BASE_URL = "https://costthresholdalarm.duckdns.org";
 
-export default function Overview({ backendStatus }) {
+export default function Overview() {
   const [budgets, setBudgets] = useState([]);
   const [spendingRecords, setSpendingRecords] = useState([]);
   const [awsCost, setAwsCost] = useState(null);
@@ -165,12 +165,6 @@ export default function Overview({ backendStatus }) {
     },
   ];
 
-  const connection = {
-    checking: { label: "Checking connection", color: "warning" },
-    connected: { label: "Backend connected", color: "success" },
-    disconnected: { label: "Backend unavailable", color: "error" },
-  }[backendStatus] || { label: "Checking connection", color: "warning" };
-
   return (
     <Box sx={{ width: "100%", minWidth: 0 }}>
       <Box
@@ -205,22 +199,6 @@ export default function Overview({ backendStatus }) {
           Refresh
         </Button>
       </Box>
-
-      <Card sx={{ my: 3, borderRadius: 3, border: "1px solid #EEECE5" }}>
-        <CardContent sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
-          <Box>
-            <Typography fontWeight={700}>Backend Connection</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {backendStatus === "connected"
-                ? "The FastAPI backend is responding."
-                : backendStatus === "disconnected"
-                  ? "The backend is currently unavailable. AWS data cannot be refreshed."
-                  : "Checking backend availability..."}
-            </Typography>
-          </Box>
-          <Chip label={connection.label} color={connection.color} variant="outlined" />
-        </CardContent>
-      </Card>
 
       {warning && <Alert severity="warning" sx={{ mb: 2 }}>{warning}</Alert>}
       {errors.map((error, index) => (
