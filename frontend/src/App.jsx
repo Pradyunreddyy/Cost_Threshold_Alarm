@@ -154,8 +154,8 @@ export default function App() {
             src="/cloud-cost-logo.svg"
             alt="CLOUD"
             sx={{
-              width: desktopCollapsed && !isMobile ? 58 : 104,
-              height: desktopCollapsed && !isMobile ? 42 : 68,
+              width: desktopCollapsed && !isMobile ? 52 : 92,
+              height: desktopCollapsed && !isMobile ? 38 : 60,
               objectFit: "contain",
               flexShrink: 0,
             }}
