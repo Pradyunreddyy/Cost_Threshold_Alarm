@@ -164,16 +164,17 @@ export default function App() {
             <Typography
               sx={{
                 position: "absolute",
-                bottom: 6,
-                left: 0,
-                right: 0,
+                bottom: 8,
+                left: 5,
+                right: 5,
                 textAlign: "center",
-                fontSize: 21,
+                fontSize: 10,
                 lineHeight: 1,
                 fontWeight: 800,
-                letterSpacing: 0.25,
+                letterSpacing: 0.1,
                 color: "#292524",
                 pointerEvents: "none",
+                whiteSpace: "nowrap",
               }}
             >
               cloud
