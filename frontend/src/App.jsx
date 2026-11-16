@@ -150,36 +150,16 @@ export default function App() {
           }}
         >
           <Box
+            component="img"
+            src="/cloud-cost-logo.svg"
+            alt="CLOUD"
             sx={{
-              position: "relative",
-              width: 46,
-              height: 43,
+              width: desktopCollapsed && !isMobile ? 58 : 104,
+              height: desktopCollapsed && !isMobile ? 42 : 68,
+              objectFit: "contain",
               flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
             }}
-          >
-            <CloudQueueRounded sx={{ color: "#EC5E27", fontSize: 49 }} />
-            <Typography
-              sx={{
-                position: "absolute",
-                bottom: 9,
-                left: 3,
-                right: 3,
-                textAlign: "center",
-                fontSize: 8,
-                lineHeight: 1,
-                fontWeight: 900,
-                letterSpacing: 0.35,
-                color: "#292524",
-                pointerEvents: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              CLOUD
-            </Typography>
-          </Box>
+          />
 
           {(!desktopCollapsed || isMobile) && (
             <Box>
