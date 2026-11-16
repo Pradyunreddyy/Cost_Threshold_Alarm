@@ -422,11 +422,10 @@ export default function AlertsNotifications() {
               </Box>
             ))}
           </Stack>
-        </CardContent>
-      </Card>
 
-      <Card sx={{ mb: 3, border: "1px solid #EEECE5", borderRadius: 3 }}>
-        <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+          <Divider sx={{ my: 3 }} />
+
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
             <SettingsRounded color="action" />
 
