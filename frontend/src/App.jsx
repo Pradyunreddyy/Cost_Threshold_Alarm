@@ -22,6 +22,7 @@ import {
 import {
   MenuRounded,
   CloudRounded,
+  CloudQueueRounded,
   DashboardRounded,
   AccountBalanceWalletRounded,
   AnalyticsRounded,
@@ -160,24 +161,24 @@ export default function App() {
               justifyContent: "center",
             }}
           >
-            <CloudRounded sx={{ color: "#EC5E27", fontSize: 46 }} />
+            <CloudQueueRounded sx={{ color: "#EC5E27", fontSize: 49 }} />
             <Typography
               sx={{
                 position: "absolute",
-                bottom: 8,
-                left: 5,
-                right: 5,
+                bottom: 9,
+                left: 3,
+                right: 3,
                 textAlign: "center",
-                fontSize: 10,
+                fontSize: 8,
                 lineHeight: 1,
-                fontWeight: 800,
-                letterSpacing: 0.1,
+                fontWeight: 900,
+                letterSpacing: 0.35,
                 color: "#292524",
                 pointerEvents: "none",
                 whiteSpace: "nowrap",
               }}
             >
-              cloud
+              CLOUD
             </Typography>
           </Box>
 
