@@ -168,7 +168,7 @@ export default function App() {
                 left: 0,
                 right: 0,
                 textAlign: "center",
-                fontSize: 7,
+                fontSize: 21,
                 lineHeight: 1,
                 fontWeight: 800,
                 letterSpacing: 0.25,
