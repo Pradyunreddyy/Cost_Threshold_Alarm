@@ -26,7 +26,6 @@ import {
   DashboardRounded,
   AccountBalanceWalletRounded,
   AnalyticsRounded,
-  CloudQueueRounded,
   NotificationsActiveRounded,
   HistoryRounded,
   SettingsRounded,
