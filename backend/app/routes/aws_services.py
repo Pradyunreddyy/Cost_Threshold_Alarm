@@ -1,4 +1,3 @@
-
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException
@@ -6,7 +5,10 @@ from fastapi import APIRouter, HTTPException
 from app.services.aws_cost_service import get_cost_and_usage
 from app.services.cost_formatting import get_service_category
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/api/aws-services",
+    tags=["AWS Services"],
+)
 
 
 @router.get("/")
@@ -28,21 +30,15 @@ def get_aws_services():
 
         for result in data["results"]:
             estimated = estimated or result["estimated"]
-
             for group in result["groups"]:
                 name = group["name"]
-                service_totals[name] = (
-                    service_totals.get(name, 0) + group["amount"]
-                )
+                service_totals[name] = service_totals.get(name, 0) + group["amount"]
 
         services = []
-
         for name, raw_cost in service_totals.items():
             cost = max(0.0, raw_cost)
-
             if cost <= 0:
                 continue
-
             services.append({
                 "name": name,
                 "category": get_service_category(name),
@@ -52,7 +48,6 @@ def get_aws_services():
             })
 
         total_cost = sum(item["cost"] for item in services)
-
         for service in services:
             service["percentage"] = (
                 round(service["cost"] / total_cost * 100, 2)
@@ -60,7 +55,6 @@ def get_aws_services():
             )
 
         services.sort(key=lambda item: item["cost"], reverse=True)
-
         highest_service = services[0] if services else None
 
         return {
@@ -74,9 +68,5 @@ def get_aws_services():
             "highest_service": highest_service,
             "services": services,
         }
-
     except (RuntimeError, ValueError) as error:
-        raise HTTPException(
-            status_code=502,
-            detail=str(error),
-        )
+        raise HTTPException(status_code=502, detail=str(error))
