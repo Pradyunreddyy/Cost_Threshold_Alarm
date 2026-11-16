@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   AppBar,
@@ -39,7 +39,6 @@ import AlertsNotifications from "./pages/AlertsNotifications";
 import SpendingHistory from "./pages/SpendingHistory";
 import Settings from "./pages/Settings";
 
-import { checkBackendHealth } from "./services/api";
 
 const drawerWidth = 250;
 const collapsedDrawerWidth = 76;
@@ -82,39 +81,10 @@ export default function App() {
   const [selectedPage, setSelectedPage] = useState("Overview");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
-  const [backendStatus, setBackendStatus] = useState("checking");
 
   const currentDrawerWidth = desktopCollapsed
     ? collapsedDrawerWidth
     : drawerWidth;
-
-  // Check backend availability every 10 seconds.
-  useEffect(() => {
-    let isMounted = true;
-
-    const checkConnection = async () => {
-      try {
-        await checkBackendHealth();
-
-        if (isMounted) {
-          setBackendStatus("connected");
-        }
-      } catch (error) {
-        if (isMounted) {
-          setBackendStatus("disconnected");
-        }
-      }
-    };
-
-    checkConnection();
-
-    const intervalId = setInterval(checkConnection, 10000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, []);
 
   const handleNavigation = (page) => {
     setSelectedPage(page);
@@ -124,7 +94,7 @@ export default function App() {
   const renderPage = () => {
     switch (selectedPage) {
       case "Overview":
-        return <Overview backendStatus={backendStatus} />;
+        return <Overview />;
 
       case "Budget Management":
         return <BudgetManagement />;
@@ -145,7 +115,7 @@ export default function App() {
         return <Settings />;
 
       default:
-        return <Overview backendStatus={backendStatus} />;
+        return <Overview />;
     }
   };
 
@@ -179,26 +149,13 @@ export default function App() {
             gap: 1.5,
           }}
         >
-          <Avatar
-            variant="rounded"
-            sx={{
-              bgcolor: "#EC5E27",
-              width: 42,
-              height: 42,
-              borderRadius: 2,
-              flexShrink: 0,
-            }}
-          >
-            <CloudRounded />
-          </Avatar>
+          <CloudRounded
+            sx={{ color: "#EC5E27", fontSize: 43, flexShrink: 0 }}
+          />
 
           {(!desktopCollapsed || isMobile) && (
             <Box>
-              <Typography fontWeight={800} fontSize={19}>
-                Cost Alarm
-              </Typography>
-
-              <Typography
+                            <Typography
                 fontSize={11}
                 sx={{ color: "#C4BDB8" }}
               >
