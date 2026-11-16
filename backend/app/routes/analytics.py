@@ -1,12 +1,13 @@
-
 from datetime import date, timedelta
-import calendar
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services.aws_cost_service import get_cost_and_usage
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/api/analytics",
+    tags=["Cost Analytics"],
+)
 
 
 def subtract_months(value: date, months: int) -> date:
@@ -29,54 +30,32 @@ def get_analytics(
         start = today - timedelta(days=6)
         end = tomorrow
         granularity = "DAILY"
-
     elif period == "Last 30 days":
         start = today - timedelta(days=29)
         end = tomorrow
         granularity = "DAILY"
-
     elif period == "Last 3 months":
         start = subtract_months(today, 2)
         end = tomorrow
         granularity = "MONTHLY"
-
     elif period == "Last 6 months":
         start = subtract_months(today, 5)
         end = tomorrow
         granularity = "MONTHLY"
-
     elif period == "Last 12 months":
         start = subtract_months(today, 11)
         end = tomorrow
         granularity = "MONTHLY"
-
     elif period == "Custom":
         if start_date is None or end_date is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Custom period requires start_date and end_date.",
-            )
-
+            raise HTTPException(status_code=400, detail="Custom period requires start_date and end_date.")
         if start_date > end_date:
-            raise HTTPException(
-                status_code=400,
-                detail="Start date must not be after end date.",
-            )
-
+            raise HTTPException(status_code=400, detail="Start date must not be after end date.")
         start = start_date
         end = end_date + timedelta(days=1)
-
-        granularity = (
-            "DAILY"
-            if (end - start).days <= 90
-            else "MONTHLY"
-        )
-
+        granularity = "DAILY" if (end - start).days <= 90 else "MONTHLY"
     else:
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported analytics period.",
-        )
+        raise HTTPException(status_code=400, detail="Unsupported analytics period.")
 
     try:
         data = get_cost_and_usage(
@@ -93,36 +72,27 @@ def get_analytics(
 
         for result in data["results"]:
             result_date = date.fromisoformat(result["start_date"])
-
-            if granularity == "DAILY":
-                labels.append(result_date.strftime("%b %d"))
-            else:
-                labels.append(result_date.strftime("%b %Y"))
-
+            labels.append(
+                result_date.strftime("%b %d")
+                if granularity == "DAILY"
+                else result_date.strftime("%b %Y")
+            )
             values.append(max(0.0, result["amount"]))
             estimated = estimated or result["estimated"]
 
             for group in result["groups"]:
                 name = group["name"]
-                service_totals[name] = (
-                    service_totals.get(name, 0) + group["amount"]
-                )
+                service_totals[name] = service_totals.get(name, 0) + group["amount"]
 
         services = [
-            {
-                "name": name,
-                "cost": round(max(0.0, amount), 4),
-            }
+            {"name": name, "cost": round(max(0.0, amount), 4)}
             for name, amount in service_totals.items()
             if amount > 0
         ]
-
         services.sort(key=lambda item: item["cost"], reverse=True)
 
         total_spending = sum(values)
-        average_spending = (
-            total_spending / len(values) if values else 0
-        )
+        average_spending = total_spending / len(values) if values else 0
 
         return {
             "source": data["source"],
@@ -138,9 +108,5 @@ def get_analytics(
             "average_spending": round(average_spending, 4),
             "highest_service": services[0] if services else None,
         }
-
     except (RuntimeError, ValueError) as error:
-        raise HTTPException(
-            status_code=502,
-            detail=str(error),
-        )
+        raise HTTPException(status_code=502, detail=str(error))
