@@ -1,26 +1,35 @@
-
 def get_service_category(service_name: str) -> str:
-    name = service_name.lower()
+    name = service_name.lower().strip()
 
     categories = {
         "Compute": [
-            "ec2", "lambda", "ecs", "eks",
-            "lightsail", "batch", "fargate",
-            "elastic beanstalk",
+            "ec2", "elastic compute cloud", "lambda", "ecs", "eks",
+            "lightsail", "batch", "fargate", "elastic beanstalk",
         ],
         "Storage": [
-            "s3", "ebs", "efs", "glacier", "backup",
+            "s3", "simple storage service", "ebs", "efs", "glacier", "backup",
         ],
         "Database": [
-            "rds", "dynamodb", "redshift",
-            "elasticache", "documentdb", "aurora",
+            "rds", "dynamodb", "redshift", "elasticache", "documentdb", "aurora",
+        ],
+        "Networking": [
+            "data transfer", "virtual private cloud", "vpc",
+            "route 53", "cloudfront", "direct connect", "api gateway",
         ],
         "Monitoring": [
-            "cloudwatch", "cloudtrail", "config",
-            "guardduty", "security hub",
+            "cloudwatch", "cloudtrail", "config", "guardduty",
+            "security hub", "cloudwatch events",
         ],
         "Notifications": [
-            "sns", "ses", "sqs",
+            "sns", "simple notification service",
+            "sqs", "simple queue service", "ses", "simple email service",
+        ],
+        "Security": [
+            "key management service", "kms", "secrets manager",
+            "certificate manager", "waf", "shield",
+        ],
+        "Cost Management": [
+            "cost explorer", "billing", "budgets",
         ],
     }
 
